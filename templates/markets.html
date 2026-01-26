@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Markets - Polymarket Analytics{% endblock %}
+
+{% block content %}
+<h1>Active Markets</h1>
+
+<div class="filters">
+    <label>Sort by:</label>
+    <a href="?sort=volume" class="btn {% if sort_by == 'volume' %}active{% endif %}">Volume</a>
+    <a href="?sort=liquidity" class="btn {% if sort_by == 'liquidity' %}active{% endif %}">Liquidity</a>
+    <a href="?sort=probability" class="btn {% if sort_by == 'probability' %}active{% endif %}">Probability</a>
+    <a href="?sort=end_date" class="btn {% if sort_by == 'end_date' %}active{% endif %}">Resolution Date</a>
+</div>
+
+<table class="data-table full-width">
+    <thead>
+        <tr>
+            <th>Market</th>
+            <th>Category</th>
+            <th>Probability</th>
+            <th>Volume</th>
+            <th>Liquidity</th>
+            <th>Resolves</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for market in markets %}
+        <tr>
+            <td>
+                <a href="/market/{{ market.id }}">{{ market.question }}</a>
+            </td>
+            <td>{{ market.category or '-' }}</td>
+            <td>
+                <div class="prob-bar">
+                    <div class="prob-fill" style="width: {{ market.probability }}%"></div>
+                    <span class="prob-text">{{ "%.1f"|format(market.probability) }}%</span>
+                </div>
+            </td>
+            <td>${{ "{:,.0f}".format(market.volume) }}</td>
+            <td>${{ "{:,.0f}".format(market.liquidity) }}</td>
+            <td>
+                {% if market.end_date %}
+                {{ market.end_date.strftime('%Y-%m-%d') }}
+                {% else %}
+                -
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

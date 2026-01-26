@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Polymarket Analytics{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <h3>Total Tracked</h3>
+        <div class="stat-value">{{ overview.total_tracked }}</div>
+        <div class="stat-label">markets</div>
+    </div>
+    <div class="stat-card">
+        <h3>Active</h3>
+        <div class="stat-value">{{ overview.active_markets }}</div>
+        <div class="stat-label">markets</div>
+    </div>
+    <div class="stat-card">
+        <h3>Resolved</h3>
+        <div class="stat-value">{{ overview.resolved_markets }}</div>
+        <div class="stat-label">markets</div>
+    </div>
+    <div class="stat-card">
+        <h3>Snapshots</h3>
+        <div class="stat-value">{{ overview.total_snapshots }}</div>
+        <div class="stat-label">data points</div>
+    </div>
+    <div class="stat-card highlight">
+        <h3>Black Swans</h3>
+        <div class="stat-value">{{ overview.black_swan_count }}</div>
+        <div class="stat-label">events</div>
+    </div>
+    <div class="stat-card">
+        <h3>Large Moves (24h)</h3>
+        <div class="stat-value">{{ overview.recent_large_moves }}</div>
+        <div class="stat-label">detected</div>
+    </div>
+</div>
+
+<section class="section">
+    <h2>Accuracy by Probability Bucket</h2>
+    <div class="chart-container">
+        <canvas id="bucketChart"></canvas>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Bucket</th>
+                <th>Resolved</th>
+                <th>Correct</th>
+                <th>Accuracy</th>
+                <th>Black Swans</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bucket in overview.bucket_stats %}
+            {% if bucket.total_resolved > 0 %}
+            <tr>
+                <td>{{ bucket.bucket }}</td>
+                <td>{{ bucket.total_resolved }}</td>
+                <td>{{ bucket.correct_predictions }}</td>
+                <td>{{ "%.1f"|format(bucket.accuracy_rate) }}%</td>
+                <td>{{ bucket.black_swan_count }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<div class="two-column">
+    <section class="section">
+        <h2>Top Markets by Volume</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Market</th>
+                    <th>Prob</th>
+                    <th>Volume</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for market in markets[:10] %}
+                <tr>
+                    <td>
+                        <a href="/market/{{ market.id }}">
+                            {{ market.question[:50] }}{% if market.question|length > 50 %}...{% endif %}
+                        </a>
+                    </td>
+                    <td class="prob-cell">{{ "%.1f"|format(market.probability) }}%</td>
+                    <td>${{ "{:,.0f}".format(market.volume) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <a href="/markets" class="btn">View All Markets</a>
+    </section>
+
+    <section class="section">
+        <h2>Recent Big Movers</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Market</th>
+                    <th>Change</th>
+                    <th>From/To</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for mover in movers[:10] %}
+                <tr>
+                    <td>
+                        <a href="/market/{{ mover.market_id }}">
+                            {{ mover.question[:40] }}{% if mover.question|length > 40 %}...{% endif %}
+                        </a>
+                    </td>
+                    <td class="{% if mover.change_points > 0 %}positive{% else %}negative{% endif %}">
+                        {% if mover.change_points > 0 %}+{% endif %}{{ "%.1f"|format(mover.change_points) }}pts
+                    </td>
+                    <td>{{ "%.0f"|format(mover.probability_start) }}% &rarr; {{ "%.0f"|format(mover.probability_end) }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <a href="/movers" class="btn">View All Movers</a>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const bucketData = {{ bucket_stats_json | tojson | safe }};
+const ctx = document.getElementById('bucketChart').getContext('2d');
+
+new Chart(ctx, {
+    type: 'bar',
+    data: {
+        labels: bucketData.filter(b => b.total_resolved > 0).map(b => b.bucket),
+        datasets: [{
+            label: 'Accuracy %',
+            data: bucketData.filter(b => b.total_resolved > 0).map(b => b.accuracy_rate),
+            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            borderColor: 'rgba(59, 130, 246, 1)',
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true,
+                max: 100,
+                title: {
+                    display: true,
+                    text: 'Accuracy %'
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            }
+        }
+    }
+});
+</script>
+{% endblock %}

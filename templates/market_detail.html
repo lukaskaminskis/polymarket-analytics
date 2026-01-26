@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+
+{% block title %}{{ market.question[:50] }} - Polymarket Analytics{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/markets">Markets</a> &raquo; <span>{{ market.question[:50] }}...</span>
+</div>
+
+<h1>{{ market.question }}</h1>
+
+<div class="market-meta">
+    {% if market.category %}
+    <span class="tag">{{ market.category }}</span>
+    {% endif %}
+    {% if market.is_resolved %}
+    <span class="tag resolved">Resolved: {{ market.resolution_outcome }}</span>
+    {% endif %}
+</div>
+
+{% if market.description %}
+<p class="description">{{ market.description }}</p>
+{% endif %}
+
+<div class="stats-grid small">
+    <div class="stat-card">
+        <h4>Current Probability</h4>
+        <div class="stat-value">
+            {% if snapshots %}{{ "%.1f"|format(snapshots[-1].probability) }}%{% else %}-{% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
+        <h4>Liquidity</h4>
+        <div class="stat-value">${{ "{:,.0f}".format(market.liquidity) }}</div>
+    </div>
+    <div class="stat-card">
+        <h4>Volume</h4>
+        <div class="stat-value">${{ "{:,.0f}".format(market.volume) }}</div>
+    </div>
+    <div class="stat-card">
+        <h4>Resolution Date</h4>
+        <div class="stat-value">{{ market.end_date[:10] if market.end_date else '-' }}</div>
+    </div>
+</div>
+
+<section class="section">
+    <h2>Probability Over Time</h2>
+    <div class="chart-container large">
+        <canvas id="probChart"></canvas>
+    </div>
+</section>
+
+{% if large_moves %}
+<section class="section">
+    <h2>Significant Moves</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Detected</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Change</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for move in large_moves %}
+            <tr>
+                <td>{{ move.detected_at[:16] }}</td>
+                <td>{{ "%.1f"|format(move.probability_start) }}%</td>
+                <td>{{ "%.1f"|format(move.probability_end) }}%</td>
+                <td class="{% if move.probability_end > move.probability_start %}positive{% else %}negative{% endif %}">
+                    {% if move.probability_end > move.probability_start %}+{% endif %}{{ "%.1f"|format(move.change_points) }}pts
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+
+<section class="section">
+    <h2>Historical Data</h2>
+    <p>{{ snapshots|length }} snapshots recorded</p>
+    {% if snapshots %}
+    <details>
+        <summary>View raw data</summary>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Probability</th>
+                    <th>Liquidity</th>
+                    <th>Volume</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for snapshot in snapshots[-50:]|reverse %}
+                <tr>
+                    <td>{{ snapshot.timestamp[:16] }}</td>
+                    <td>{{ "%.2f"|format(snapshot.probability) }}%</td>
+                    <td>${{ "{:,.0f}".format(snapshot.liquidity) }}</td>
+                    <td>${{ "{:,.0f}".format(snapshot.volume) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </details>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const snapshots = {{ snapshots | tojson | safe }};
+const largeMoves = {{ large_moves | tojson | safe }};
+const isResolved = {{ market.is_resolved | tojson | safe }};
+
+const ctx = document.getElementById('probChart').getContext('2d');
+
+// Prepare data
+const labels = snapshots.map(s => new Date(s.timestamp).toLocaleString());
+const data = snapshots.map(s => s.probability);
+
+// Prepare annotations for large moves
+const annotations = {};
+largeMoves.forEach((move, i) => {
+    const idx = snapshots.findIndex(s => s.timestamp >= move.detected_at);
+    if (idx >= 0) {
+        annotations[`move${i}`] = {
+            type: 'line',
+            xMin: idx,
+            xMax: idx,
+            borderColor: 'rgba(239, 68, 68, 0.7)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+                display: true,
+                content: `${move.change_points > 0 ? '+' : ''}${move.change_points.toFixed(1)}pts`,
+                position: 'start'
+            }
+        };
+    }
+});
+
+// Add resolution marker
+if (isResolved && snapshots.length > 0) {
+    annotations['resolution'] = {
+        type: 'line',
+        xMin: snapshots.length - 1,
+        xMax: snapshots.length - 1,
+        borderColor: 'rgba(34, 197, 94, 0.7)',
+        borderWidth: 3,
+        label: {
+            display: true,
+            content: 'Resolved',
+            position: 'start'
+        }
+    };
+}
+
+new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'Probability %',
+            data: data,
+            borderColor: 'rgba(59, 130, 246, 1)',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            fill: true,
+            tension: 0.1,
+            pointRadius: 2
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true,
+                max: 100,
+                title: {
+                    display: true,
+                    text: 'Probability %'
+                }
+            },
+            x: {
+                ticks: {
+                    maxTicksLimit: 10
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            }
+        }
+    }
+});
+</script>
+{% endblock %}

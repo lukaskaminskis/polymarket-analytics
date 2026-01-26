@@ -1,0 +1,471 @@
+{% extends "base.html" %}
+
+{% block title %}Outcome Simulation - Polymarket Analytics{% endblock %}
+
+{% block content %}
+<h1>Outcome Simulation</h1>
+<p class="subtitle">Select any historical date to simulate investment outcomes on resolved Polymarket markets</p>
+
+<section class="section">
+    <h2>Select Simulation Date</h2>
+    <p class="info-text">
+        Choose a date in the past. The simulation will show markets that resolved within 30 days after that date,
+        using the prices that were available on your selected date.
+    </p>
+    <div class="date-selector">
+        <div class="date-input-group">
+            <label for="simulationDate">Simulation Date:</label>
+            <input type="date" id="simulationDate" class="date-input" max="">
+        </div>
+        <div class="liquidity-input-group">
+            <label for="minVolume">Min Volume ($):</label>
+            <input type="number" id="minVolume" class="number-input" value="100000" min="0" step="10000">
+        </div>
+        <button id="loadMarketsBtn" class="btn primary" disabled>Load Markets</button>
+    </div>
+    <div class="checkbox-group" style="margin-top: 1rem;">
+        <label class="checkbox-label">
+            <input type="checkbox" id="anyResolved">
+            <span>Any Resolved Markets</span>
+        </label>
+        <span class="checkbox-hint">(Ignore date filter - get top 50 resolved markets by volume)</span>
+    </div>
+    <p class="hint-text">
+        Tip: Try dates 30-60 days in the past for the best results, as markets need time to resolve.
+        Or enable "Any Resolved Markets" to see the top 50 highest-volume resolved markets regardless of date.
+    </p>
+</section>
+
+<section class="section" id="marketsSection" style="display: none;">
+    <h2 id="marketsHeader">Markets Resolving Within 30 Days of <span id="selectedDateDisplay"></span></h2>
+    <p class="info-text" id="marketsDescription">
+        Showing top 50 highest-liquidity markets that resolved within 30 days of your selected date.
+        Prices shown are from the simulation date. Select outcomes and enter investment amounts.
+    </p>
+
+    <div id="marketsLoading" class="loading" style="display: none;">
+        <div class="spinner"></div>
+        <p>Fetching historical data from Polymarket...</p>
+        <p class="loading-hint">This may take a moment as we query historical prices.</p>
+    </div>
+
+    <div id="marketsError" class="error-state" style="display: none;"></div>
+
+    <div id="marketsContainer"></div>
+
+    <div id="simulationControls" style="display: none;">
+        <div class="simulation-actions">
+            <button id="calculateBtn" class="btn primary large">Calculate Results</button>
+            <button id="clearAllBtn" class="btn">Clear All</button>
+            <button id="selectAllYesBtn" class="btn">Bet All "Yes"</button>
+            <button id="selectAllNoBtn" class="btn">Bet All "No"</button>
+        </div>
+        <div class="bulk-investment">
+            <label>Set all investments to: $</label>
+            <input type="number" id="bulkAmount" class="number-input small" value="100" min="0" step="10">
+            <button id="applyBulkBtn" class="btn">Apply</button>
+        </div>
+    </div>
+</section>
+
+<section class="section" id="resultsSection" style="display: none;">
+    <h2>Simulation Results</h2>
+    <div class="results-grid">
+        <div class="result-card">
+            <h4>Total Invested</h4>
+            <div class="result-value" id="totalInvested">$0.00</div>
+        </div>
+        <div class="result-card">
+            <h4>Final Value</h4>
+            <div class="result-value" id="finalValue">$0.00</div>
+        </div>
+        <div class="result-card" id="profitCard">
+            <h4>Profit / Loss</h4>
+            <div class="result-value" id="profitLoss">$0.00</div>
+        </div>
+        <div class="result-card">
+            <h4>Return</h4>
+            <div class="result-value" id="returnPct">0.00%</div>
+        </div>
+    </div>
+
+    <div class="results-summary">
+        <div class="summary-item">
+            <span class="label">Positions:</span>
+            <span id="totalPositions">0</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">Winners:</span>
+            <span id="totalWinners" class="positive">0</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">Losers:</span>
+            <span id="totalLosers" class="negative">0</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">Win Rate:</span>
+            <span id="winRate">0%</span>
+        </div>
+    </div>
+
+    <div id="resultsBreakdown">
+        <h3>Position Breakdown</h3>
+        <table class="data-table full-width" id="resultsTable">
+            <thead>
+                <tr>
+                    <th>Market</th>
+                    <th>Position</th>
+                    <th>Entry Price</th>
+                    <th>Invested</th>
+                    <th>Shares</th>
+                    <th>Outcome</th>
+                    <th>Payout</th>
+                    <th>P/L</th>
+                </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let marketsData = [];
+
+// Set max date to today
+const today = new Date().toISOString().split('T')[0];
+const dateInput = document.getElementById('simulationDate');
+dateInput.max = today;
+
+// Default to 45 days ago for best results
+const defaultDate = new Date();
+defaultDate.setDate(defaultDate.getDate() - 45);
+dateInput.value = defaultDate.toISOString().split('T')[0];
+
+const loadMarketsBtn = document.getElementById('loadMarketsBtn');
+const marketsSection = document.getElementById('marketsSection');
+const marketsLoading = document.getElementById('marketsLoading');
+const marketsError = document.getElementById('marketsError');
+const marketsContainer = document.getElementById('marketsContainer');
+const simulationControls = document.getElementById('simulationControls');
+const resultsSection = document.getElementById('resultsSection');
+
+// Enable load button when date is valid
+dateInput.addEventListener('change', () => {
+    loadMarketsBtn.disabled = !dateInput.value;
+});
+loadMarketsBtn.disabled = !dateInput.value;
+
+// Load markets for selected date
+loadMarketsBtn.addEventListener('click', async () => {
+    const selectedDate = dateInput.value;
+    const minVolume = document.getElementById('minVolume').value || 100000;
+    const anyResolved = document.getElementById('anyResolved').checked;
+
+    if (!selectedDate) return;
+
+    marketsSection.style.display = 'block';
+    marketsLoading.style.display = 'block';
+    marketsError.style.display = 'none';
+    marketsContainer.innerHTML = '';
+    simulationControls.style.display = 'none';
+    resultsSection.style.display = 'none';
+
+    // Update header and description based on mode
+    if (anyResolved) {
+        document.getElementById('marketsHeader').innerHTML = 'Top 50 Resolved Markets by Volume';
+        document.getElementById('marketsDescription').innerHTML =
+            'Showing the top 50 highest-volume resolved markets from Polymarket. ' +
+            'Historical prices are estimated. Select outcomes and enter investment amounts.';
+    } else {
+        document.getElementById('marketsHeader').innerHTML =
+            'Markets Resolving Within 30 Days of <span id="selectedDateDisplay">' + selectedDate + '</span>';
+        document.getElementById('marketsDescription').innerHTML =
+            'Showing top 50 highest-volume markets that resolved within 30 days of your selected date. ' +
+            'Prices shown are from the simulation date. Select outcomes and enter investment amounts.';
+    }
+
+    try {
+        const response = await fetch(
+            `/api/simulation/markets?date=${selectedDate}&min_volume=${minVolume}&limit=50&any_resolved=${anyResolved}`
+        );
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to fetch markets');
+        }
+
+        marketsData = await response.json();
+
+        if (marketsData.length === 0) {
+            marketsContainer.innerHTML = `
+                <div class="empty-state">
+                    <h3>No Markets Found</h3>
+                    <p>No resolved markets found for this date range with the specified liquidity.</p>
+                    <p>Try:</p>
+                    <ul>
+                        <li>A date further in the past (30-90 days ago works best)</li>
+                        <li>Lowering the minimum liquidity threshold</li>
+                    </ul>
+                </div>
+            `;
+        } else {
+            renderMarkets(marketsData);
+            simulationControls.style.display = 'block';
+        }
+    } catch (error) {
+        marketsError.innerHTML = `
+            <h3>Error Loading Markets</h3>
+            <p>${error.message}</p>
+            <p>Please try a different date or check your connection.</p>
+        `;
+        marketsError.style.display = 'block';
+    }
+
+    marketsLoading.style.display = 'none';
+});
+
+function renderMarkets(markets) {
+    let html = '<table class="data-table full-width simulation-table">';
+    html += `
+        <thead>
+            <tr>
+                <th>Market</th>
+                <th>Resolved</th>
+                <th>Volume</th>
+                <th>Prices at Date</th>
+                <th>Your Position</th>
+                <th>Investment ($)</th>
+                <th>Result</th>
+            </tr>
+        </thead>
+        <tbody>
+    `;
+
+    markets.forEach((market, index) => {
+        const outcomes = market.outcomes || ['Yes', 'No'];
+        const prices = market.outcome_prices_at_date || {};
+        const winningOutcome = market.resolution_outcome;
+
+        // Build outcome selector
+        let outcomeOptions = '<option value="">Skip</option>';
+        outcomes.forEach(outcome => {
+            const price = prices[outcome] || 0;
+            const priceDisplay = (price * 100).toFixed(1);
+            outcomeOptions += `<option value="${outcome}">${outcome} @ ${priceDisplay}c</option>`;
+        });
+
+        // Build prices display
+        let pricesDisplay = outcomes.map(o => {
+            const p = prices[o] || 0;
+            const isWinner = o === winningOutcome;
+            return `<span class="${isWinner ? 'winner' : ''}">${o}: ${(p * 100).toFixed(1)}c</span>`;
+        }).join('<br>');
+
+        // Result display
+        const resultClass = winningOutcome ? 'resolved' : 'pending';
+        const resultText = winningOutcome || 'Unknown';
+
+        html += `
+            <tr data-index="${index}">
+                <td class="market-question">
+                    <a href="https://polymarket.com/event/${market.market_id}" target="_blank" rel="noopener">
+                        ${market.question}
+                    </a>
+                    <div class="market-category">${market.category || ''}</div>
+                </td>
+                <td>${market.end_date ? market.end_date.slice(0, 10) : '-'}</td>
+                <td>$${(market.volume || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                <td class="prices-cell">${pricesDisplay}</td>
+                <td>
+                    <select class="outcome-select" data-index="${index}">
+                        ${outcomeOptions}
+                    </select>
+                </td>
+                <td>
+                    <input type="number" class="investment-input" data-index="${index}"
+                           min="0" step="10" placeholder="0" disabled>
+                </td>
+                <td class="result-cell ${resultClass}">
+                    <span class="result-badge">${resultText}</span>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table>';
+    marketsContainer.innerHTML = html;
+
+    // Add event listeners
+    document.querySelectorAll('.outcome-select').forEach(select => {
+        select.addEventListener('change', (e) => {
+            const idx = e.target.dataset.index;
+            const input = document.querySelector(`.investment-input[data-index="${idx}"]`);
+            input.disabled = !e.target.value;
+            if (!e.target.value) input.value = '';
+        });
+    });
+}
+
+// Bulk selection buttons
+document.getElementById('selectAllYesBtn').addEventListener('click', () => {
+    document.querySelectorAll('.outcome-select').forEach(select => {
+        const yesOption = Array.from(select.options).find(o => o.value === 'Yes');
+        if (yesOption) {
+            select.value = 'Yes';
+            const idx = select.dataset.index;
+            document.querySelector(`.investment-input[data-index="${idx}"]`).disabled = false;
+        }
+    });
+});
+
+document.getElementById('selectAllNoBtn').addEventListener('click', () => {
+    document.querySelectorAll('.outcome-select').forEach(select => {
+        const noOption = Array.from(select.options).find(o => o.value === 'No');
+        if (noOption) {
+            select.value = 'No';
+            const idx = select.dataset.index;
+            document.querySelector(`.investment-input[data-index="${idx}"]`).disabled = false;
+        }
+    });
+});
+
+document.getElementById('applyBulkBtn').addEventListener('click', () => {
+    const amount = document.getElementById('bulkAmount').value || 0;
+    document.querySelectorAll('.investment-input').forEach(input => {
+        if (!input.disabled) {
+            input.value = amount;
+        }
+    });
+});
+
+// Calculate results
+document.getElementById('calculateBtn').addEventListener('click', () => {
+    const positions = [];
+    let totalInvested = 0;
+    let totalPayout = 0;
+    let winners = 0;
+    let losers = 0;
+
+    document.querySelectorAll('.outcome-select').forEach(select => {
+        const idx = parseInt(select.dataset.index);
+        const selectedOutcome = select.value;
+        if (!selectedOutcome) return;
+
+        const input = document.querySelector(`.investment-input[data-index="${idx}"]`);
+        const investment = parseFloat(input.value) || 0;
+        if (investment <= 0) return;
+
+        const market = marketsData[idx];
+        const prices = market.outcome_prices_at_date || {};
+        const entryPrice = prices[selectedOutcome] || 0;
+        const winningOutcome = market.resolution_outcome;
+
+        // Calculate shares: investment / price
+        const shares = entryPrice > 0 ? investment / entryPrice : 0;
+
+        // Calculate payout: winning outcome pays $1 per share, losing pays $0
+        const won = selectedOutcome === winningOutcome;
+        const payout = won ? shares : 0;
+        const profitLoss = payout - investment;
+
+        totalInvested += investment;
+        totalPayout += payout;
+
+        if (won) winners++;
+        else losers++;
+
+        positions.push({
+            market: market.question,
+            marketId: market.market_id,
+            outcome: selectedOutcome,
+            entryPrice: entryPrice,
+            investment: investment,
+            shares: shares,
+            winningOutcome: winningOutcome,
+            won: won,
+            payout: payout,
+            profitLoss: profitLoss
+        });
+    });
+
+    if (positions.length === 0) {
+        alert('Please select at least one position with an investment amount.');
+        return;
+    }
+
+    // Display results
+    const totalProfitLoss = totalPayout - totalInvested;
+    const returnPct = totalInvested > 0 ? (totalProfitLoss / totalInvested) * 100 : 0;
+    const winRate = positions.length > 0 ? (winners / positions.length) * 100 : 0;
+
+    document.getElementById('totalInvested').textContent = `$${totalInvested.toFixed(2)}`;
+    document.getElementById('finalValue').textContent = `$${totalPayout.toFixed(2)}`;
+
+    const profitLossEl = document.getElementById('profitLoss');
+    profitLossEl.textContent = `${totalProfitLoss >= 0 ? '+' : ''}$${totalProfitLoss.toFixed(2)}`;
+    profitLossEl.className = `result-value ${totalProfitLoss >= 0 ? 'positive' : 'negative'}`;
+
+    const profitCard = document.getElementById('profitCard');
+    profitCard.className = `result-card ${totalProfitLoss >= 0 ? 'profit' : 'loss'}`;
+
+    const returnEl = document.getElementById('returnPct');
+    returnEl.textContent = `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%`;
+    returnEl.className = `result-value ${returnPct >= 0 ? 'positive' : 'negative'}`;
+
+    // Summary stats
+    document.getElementById('totalPositions').textContent = positions.length;
+    document.getElementById('totalWinners').textContent = winners;
+    document.getElementById('totalLosers').textContent = losers;
+    document.getElementById('winRate').textContent = `${winRate.toFixed(1)}%`;
+
+    // Build results table
+    let tbody = '';
+    positions.sort((a, b) => b.profitLoss - a.profitLoss); // Sort by P/L
+
+    positions.forEach(pos => {
+        const plClass = pos.profitLoss >= 0 ? 'positive' : 'negative';
+        const wonClass = pos.won ? 'winner' : 'loser';
+
+        tbody += `
+            <tr class="${wonClass}">
+                <td>
+                    <a href="https://polymarket.com/event/${pos.marketId}" target="_blank" rel="noopener">
+                        ${pos.market.length > 60 ? pos.market.slice(0, 60) + '...' : pos.market}
+                    </a>
+                </td>
+                <td>${pos.outcome}</td>
+                <td>${(pos.entryPrice * 100).toFixed(1)}c</td>
+                <td>$${pos.investment.toFixed(2)}</td>
+                <td>${pos.shares.toFixed(2)}</td>
+                <td class="${wonClass}">
+                    ${pos.winningOutcome}
+                    ${pos.won ? ' (Won)' : ' (Lost)'}
+                </td>
+                <td>$${pos.payout.toFixed(2)}</td>
+                <td class="${plClass}">
+                    ${pos.profitLoss >= 0 ? '+' : ''}$${pos.profitLoss.toFixed(2)}
+                </td>
+            </tr>
+        `;
+    });
+    document.getElementById('resultsBody').innerHTML = tbody;
+
+    resultsSection.style.display = 'block';
+    resultsSection.scrollIntoView({ behavior: 'smooth' });
+});
+
+// Clear all selections
+document.getElementById('clearAllBtn').addEventListener('click', () => {
+    document.querySelectorAll('.outcome-select').forEach(select => {
+        select.value = '';
+    });
+    document.querySelectorAll('.investment-input').forEach(input => {
+        input.value = '';
+        input.disabled = true;
+    });
+    resultsSection.style.display = 'none';
+});
+</script>
+{% endblock %}

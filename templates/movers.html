@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Movers - Polymarket Analytics{% endblock %}
+
+{% block content %}
+<h1>Biggest Movers</h1>
+<p class="subtitle">Markets with the largest probability changes in the last {{ window_hours }} hours</p>
+
+<table class="data-table full-width">
+    <thead>
+        <tr>
+            <th>Market</th>
+            <th>Category</th>
+            <th>Change</th>
+            <th>Max Swing</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Volume</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for mover in movers %}
+        <tr>
+            <td>
+                <a href="/market/{{ mover.market_id }}">{{ mover.question }}</a>
+            </td>
+            <td>{{ mover.category or '-' }}</td>
+            <td class="change-cell {% if mover.change_points > 0 %}positive{% else %}negative{% endif %}">
+                <span class="change-badge">
+                    {% if mover.change_points > 0 %}+{% endif %}{{ "%.1f"|format(mover.change_points) }}pts
+                </span>
+            </td>
+            <td>{{ "%.1f"|format(mover.max_swing) }}pts</td>
+            <td>{{ "%.1f"|format(mover.probability_start) }}%</td>
+            <td>{{ "%.1f"|format(mover.probability_end) }}%</td>
+            <td>${{ "{:,.0f}".format(mover.volume) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if not movers %}
+<div class="empty-state">
+    <p>No significant moves detected yet.</p>
+    <p>Run data collection to start tracking markets.</p>
+</div>
+{% endif %}
+{% endblock %}
