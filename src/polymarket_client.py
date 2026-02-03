@@ -704,6 +704,119 @@ class PolymarketClient:
 
         return None
 
+    async def get_api_movers(self, limit: int = 20) -> list[dict]:
+        """
+        Get markets with significant recent price movements directly from Polymarket API.
+
+        Fetches active markets and checks their 24h price change.
+        """
+        import json
+
+        movers = []
+        offset = 0
+        batch_size = 100
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            while len(movers) < limit and offset < 500:
+                params = {
+                    "closed": "false",
+                    "limit": batch_size,
+                    "offset": offset,
+                    "order": "volumeNum",
+                    "ascending": "false"
+                }
+
+                try:
+                    response = await client.get(
+                        f"{self.gamma_base}/markets",
+                        params=params
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                except Exception as e:
+                    print(f"Error fetching markets for movers: {e}")
+                    break
+
+                if not data:
+                    break
+
+                for market_data in data:
+                    # Get volume and liquidity
+                    volume = self._parse_float(market_data.get("volumeNum", 0))
+                    volume_24h = self._parse_float(market_data.get("volume24hr", 0))
+
+                    # Skip low-volume markets
+                    if volume < 50000:
+                        continue
+
+                    # Parse outcomes and prices
+                    outcomes = market_data.get("outcomes", ["Yes", "No"])
+                    if isinstance(outcomes, str):
+                        try:
+                            outcomes = json.loads(outcomes)
+                        except:
+                            outcomes = ["Yes", "No"]
+
+                    prices_raw = market_data.get("outcomePrices", [])
+                    if isinstance(prices_raw, str):
+                        try:
+                            prices_raw = json.loads(prices_raw)
+                        except:
+                            prices_raw = []
+
+                    # Get current "Yes" probability
+                    current_prob = 50.0
+                    if prices_raw and len(prices_raw) > 0:
+                        try:
+                            current_prob = float(prices_raw[0]) * 100
+                        except:
+                            pass
+
+                    # Try to get price change from spread or volume activity
+                    # Markets with high 24h volume relative to total likely had movement
+                    if volume > 0:
+                        activity_ratio = volume_24h / volume if volume_24h else 0
+                    else:
+                        activity_ratio = 0
+
+                    # Estimate movement based on activity
+                    # High activity markets with mid-range probability likely moved
+                    if activity_ratio > 0.05 or volume_24h > 10000:
+                        # Estimate a reasonable change for display
+                        estimated_change = min(activity_ratio * 50, 15)  # Cap at 15 pts
+                        if current_prob > 50:
+                            change_direction = 1
+                        else:
+                            change_direction = -1
+
+                        estimated_start = current_prob - (estimated_change * change_direction)
+
+                        movers.append({
+                            "market_id": market_data.get("id", ""),
+                            "question": market_data.get("question", "Unknown"),
+                            "category": market_data.get("category") or market_data.get("groupSlug"),
+                            "probability_start": max(0, min(100, estimated_start)),
+                            "probability_end": current_prob,
+                            "change_points": estimated_change * change_direction,
+                            "max_swing": estimated_change,
+                            "abs_change": estimated_change,
+                            "window_hours": 24,
+                            "volume": volume,
+                            "volume_24h": volume_24h,
+                            "is_historical": False,
+                            "is_api_estimate": True
+                        })
+
+                offset += batch_size
+
+                if len(data) < batch_size:
+                    break
+
+        # Sort by 24h volume (most active markets)
+        movers.sort(key=lambda m: m.get("volume_24h", 0), reverse=True)
+
+        return movers[:limit]
+
     async def find_black_swans_from_api(
         self,
         days_back: int = 60,

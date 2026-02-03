@@ -40,8 +40,8 @@
     </div>
     <div class="stat-card highlight">
         <h3>Black Swans</h3>
-        <div class="stat-value">{{ overview.black_swan_count }}</div>
-        <div class="stat-label">events</div>
+        <div class="stat-value">{% if black_swans %}{{ black_swans|length }}{% else %}{{ overview.black_swan_count }}{% endif %}</div>
+        <div class="stat-label">{% if black_swans %}from API{% else %}events{% endif %}</div>
     </div>
     <div class="stat-card">
         <h3>Large Moves (24h)</h3>
@@ -138,6 +138,38 @@
         <a href="/movers" class="btn">View All Movers</a>
     </section>
 </div>
+
+{% if black_swans %}
+<section class="section">
+    <h2>Recent Black Swan Events</h2>
+    <p class="subtitle" style="color: #6b7280; margin-bottom: 16px;">Markets where the underdog won (from Polymarket API)</p>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Market</th>
+                <th>Winner</th>
+                <th>Early Odds</th>
+                <th>Volume</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for swan in black_swans[:5] %}
+            <tr>
+                <td>
+                    <a href="/market/{{ swan.market_id }}">
+                        {{ swan.question[:50] }}{% if swan.question|length > 50 %}...{% endif %}
+                    </a>
+                </td>
+                <td><span class="badge">{{ swan.winning_outcome }}</span></td>
+                <td class="negative">{{ "%.0f"|format(swan.early_probability or 0) }}%</td>
+                <td>${{ "{:,.0f}".format(swan.volume) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <a href="/black-swans" class="btn">View All Black Swans</a>
+</section>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

@@ -24,8 +24,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
-# Analytics engine
+# Analytics engine and API client
 engine = AnalyticsEngine()
+polymarket_client = PolymarketClient()
 
 
 @app.on_event("startup")
@@ -40,6 +41,22 @@ async def dashboard(request: Request):
     overview = await engine.get_overview_stats()
     markets = await engine.get_active_markets(limit=20)
     movers = await engine.get_recent_movers(limit=10)
+
+    # If no local movers, try to get from API
+    if not movers:
+        movers = await polymarket_client.get_api_movers(limit=10)
+
+    # Fetch black swans from API if local count is 0
+    black_swans = []
+    if overview.black_swan_count == 0:
+        try:
+            black_swans = await polymarket_client.find_black_swans_from_api(
+                days_back=60,
+                min_volume=100000,
+                limit=5
+            )
+        except Exception as e:
+            print(f"Error fetching black swans from API: {e}")
 
     # Convert bucket_stats to serializable dicts for template
     bucket_stats_json = [
@@ -59,6 +76,7 @@ async def dashboard(request: Request):
         "bucket_stats_json": bucket_stats_json,
         "markets": markets,
         "movers": movers,
+        "black_swans": black_swans,
         "config": settings
     })
 
@@ -95,6 +113,10 @@ async def market_detail(request: Request, market_id: str):
 async def movers_page(request: Request):
     """Large movers page."""
     movers = await engine.get_recent_movers(limit=50)
+
+    # If no local movers, fetch from Polymarket API
+    if not movers:
+        movers = await polymarket_client.get_api_movers(limit=50)
 
     return templates.TemplateResponse("movers.html", {
         "request": request,
@@ -198,9 +220,6 @@ async def api_black_swans(limit: int = 50):
 
 
 # Simulation endpoints
-polymarket_client = PolymarketClient()
-
-
 @app.get("/simulation", response_class=HTMLResponse)
 async def simulation_page(request: Request):
     """Outcome simulation page - access any historical Polymarket data."""

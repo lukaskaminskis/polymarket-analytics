@@ -5,7 +5,12 @@
 {% block content %}
 <h1>Biggest Movers</h1>
 
-{% if movers and movers[0].is_historical %}
+{% if movers and movers[0].is_api_estimate %}
+<div class="alert alert-info" style="background: #e0f2fe; border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+    <strong>Live from Polymarket API.</strong> Showing most active markets by 24h trading volume.
+</div>
+<p class="subtitle">Markets with the highest recent trading activity</p>
+{% elif movers and movers[0].is_historical %}
 <div class="alert alert-info" style="background: #e0f2fe; border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
     <strong>Showing all-time data.</strong> No significant moves in the last {{ window_hours }} hours.
     <br>Run <code style="background: #bae6fd; padding: 2px 6px; border-radius: 4px;">python cli.py collect</code> regularly to track recent movements.
