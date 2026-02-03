@@ -44,9 +44,9 @@
         <div class="stat-label">{% if black_swans %}from API{% else %}events{% endif %}</div>
     </div>
     <div class="stat-card">
-        <h3>Large Moves (24h)</h3>
-        <div class="stat-value">{{ overview.recent_large_moves }}</div>
-        <div class="stat-label">detected</div>
+        <h3>Active Markets</h3>
+        <div class="stat-value">{% if movers %}{{ movers|length }}{% else %}{{ overview.recent_large_moves }}{% endif %}</div>
+        <div class="stat-label">top movers</div>
     </div>
 </div>
 
@@ -111,6 +111,7 @@
 
     <section class="section">
         <h2>Recent Big Movers</h2>
+        {% if movers %}
         <table class="data-table">
             <thead>
                 <tr>
@@ -135,6 +136,9 @@
                 {% endfor %}
             </tbody>
         </table>
+        {% else %}
+        <p style="color: #6b7280; padding: 20px;">Loading market data from Polymarket API...</p>
+        {% endif %}
         <a href="/movers" class="btn">View All Movers</a>
     </section>
 </div>
