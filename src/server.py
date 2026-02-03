@@ -77,24 +77,34 @@ async def dashboard(request: Request):
 
     # Always fetch movers from API for freshest data
     # Local movers require multiple snapshots over time
+    movers = []
     try:
+        print("[Dashboard] Fetching movers from API...")
         movers = await polymarket_client.get_api_movers(limit=10)
+        print(f"[Dashboard] Got {len(movers)} movers from API")
     except Exception as e:
-        print(f"Error fetching movers from API: {e}")
+        print(f"[Dashboard] Error fetching movers from API: {e}")
+        import traceback
+        traceback.print_exc()
         # Fallback to local data
         movers = await engine.get_recent_movers(limit=10)
+        print(f"[Dashboard] Fallback: {len(movers)} local movers")
 
     # Fetch black swans from API if local count is 0
     black_swans = []
     if overview.black_swan_count == 0:
         try:
+            print("[Dashboard] Fetching black swans from API...")
             black_swans = await polymarket_client.find_black_swans_from_api(
                 days_back=60,
                 min_volume=100000,
                 limit=5
             )
+            print(f"[Dashboard] Got {len(black_swans)} black swans from API")
         except Exception as e:
-            print(f"Error fetching black swans from API: {e}")
+            print(f"[Dashboard] Error fetching black swans from API: {e}")
+            import traceback
+            traceback.print_exc()
 
     # Convert bucket_stats to serializable dicts for template
     bucket_stats_json = [
