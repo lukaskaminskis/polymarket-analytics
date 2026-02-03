@@ -74,6 +74,17 @@ def stats():
     overview = asyncio.run(run())
 
     click.echo("\n=== Polymarket Analytics Overview ===\n")
+
+    # Show data freshness warning
+    if overview.is_data_stale:
+        click.echo(click.style(
+            f"⚠️  Data is stale! Last update: {overview.data_age_hours:.1f} hours ago",
+            fg='yellow'
+        ))
+        click.echo(click.style("   Run 'python cli.py collect' to fetch fresh data.\n", fg='yellow'))
+    elif overview.last_data_update:
+        click.echo(f"Last data update: {overview.last_data_update.strftime('%Y-%m-%d %H:%M')} UTC")
+
     click.echo(f"Total markets tracked: {overview.total_tracked}")
     click.echo(f"Active markets: {overview.active_markets}")
     click.echo(f"Resolved markets: {overview.resolved_markets}")
@@ -105,12 +116,13 @@ def movers():
     click.echo("\n=== Biggest Movers ===\n")
     for mover in recent_movers:
         direction = "↑" if mover['change_points'] > 0 else "↓"
+        historical = " (all-time)" if mover.get('is_historical') else ""
         click.echo(
             f"{direction} {abs(mover['change_points']):.1f}pts: "
-            f"{mover['probability_start']:.1f}% → {mover['probability_end']:.1f}%"
+            f"{mover['probability_start']:.1f}% → {mover['probability_end']:.1f}%{historical}"
         )
         click.echo(f"  {mover['question'][:70]}...")
-        click.echo(f"  Liquidity: ${mover['liquidity']:,.0f}\n")
+        click.echo(f"  Volume: ${mover['volume']:,.0f}\n")
 
 
 @cli.command()

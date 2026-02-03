@@ -5,6 +5,18 @@
 {% block content %}
 <h1>Dashboard</h1>
 
+{% if overview.is_data_stale %}
+<div class="alert alert-warning" style="background: #fef3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+    <strong>Data is stale!</strong> Last update was {{ "%.1f"|format(overview.data_age_hours) }} hours ago.
+    <br>Run <code style="background: #fff3cd; padding: 2px 6px; border-radius: 4px;">python cli.py collect</code> to fetch fresh data from Polymarket.
+</div>
+{% elif overview.last_data_update %}
+<div class="data-freshness" style="color: #6b7280; font-size: 14px; margin-bottom: 16px;">
+    Last updated: {{ overview.last_data_update.strftime('%Y-%m-%d %H:%M') }} UTC
+    {% if overview.data_age_hours %}({{ "%.1f"|format(overview.data_age_hours) }} hours ago){% endif %}
+</div>
+{% endif %}
+
 <div class="stats-grid">
     <div class="stat-card">
         <h3>Total Tracked</h3>

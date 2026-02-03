@@ -60,6 +60,9 @@ class OverviewStats:
     bucket_stats: list[ProbabilityBucketStats]
     black_swan_count: int
     recent_large_moves: int
+    last_data_update: Optional[datetime] = None
+    data_age_hours: Optional[float] = None
+    is_data_stale: bool = False
 
 
 class AnalyticsEngine:
@@ -108,6 +111,20 @@ class AnalyticsEngine:
             )
             recent_large_moves = large_moves_result.scalar() or 0
 
+            # Get last data update timestamp
+            last_update_result = await session.execute(
+                select(func.max(MarketSnapshot.timestamp))
+            )
+            last_data_update = last_update_result.scalar()
+
+            # Calculate data age
+            data_age_hours = None
+            is_data_stale = False
+            if last_data_update:
+                age = datetime.utcnow() - last_data_update
+                data_age_hours = age.total_seconds() / 3600
+                is_data_stale = data_age_hours > 24  # Stale if older than 24 hours
+
             return OverviewStats(
                 total_tracked=total_tracked,
                 active_markets=active_markets,
@@ -115,7 +132,10 @@ class AnalyticsEngine:
                 total_snapshots=total_snapshots,
                 bucket_stats=bucket_stats,
                 black_swan_count=black_swan_count,
-                recent_large_moves=recent_large_moves
+                recent_large_moves=recent_large_moves,
+                last_data_update=last_data_update,
+                data_age_hours=data_age_hours,
+                is_data_stale=is_data_stale
             )
 
     async def _get_bucket_stats(self, session: AsyncSession) -> list[ProbabilityBucketStats]:
@@ -344,16 +364,21 @@ class AnalyticsEngine:
 
         return detected_moves
 
-    async def get_recent_movers(self, limit: int = 20) -> list[dict]:
+    async def get_recent_movers(self, limit: int = 20, fallback_to_all: bool = True) -> list[dict]:
         """Get markets with largest recent probability changes.
 
         Looks at max swing within the window (not just first vs last) to catch
         volatile markets that moved significantly at any point.
+
+        Args:
+            limit: Maximum number of movers to return
+            fallback_to_all: If True and no recent movers found, return all-time movers
         """
         window_hours = settings.large_move_window_hours
         window_start = datetime.utcnow() - timedelta(hours=window_hours)
 
         movers = []
+        is_historical = False
 
         async with async_session() as session:
             # Get active markets
@@ -399,8 +424,49 @@ class AnalyticsEngine:
                         "max_swing": max_swing,
                         "abs_change": abs(directional_change),
                         "window_hours": window_hours,
-                        "volume": market.volume
+                        "volume": market.volume,
+                        "is_historical": False
                     })
+
+            # If no recent movers and fallback enabled, get all-time movers
+            if not movers and fallback_to_all:
+                is_historical = True
+                for market in markets:
+                    # Get ALL snapshots for this market
+                    snapshots_result = await session.execute(
+                        select(MarketSnapshot)
+                        .where(MarketSnapshot.market_id == market.id)
+                        .order_by(MarketSnapshot.timestamp.asc())
+                    )
+                    snapshots = snapshots_result.scalars().all()
+
+                    if len(snapshots) < 2:
+                        continue
+
+                    # Find the max swing across all time
+                    probs = [s.probability for s in snapshots]
+                    min_prob = min(probs)
+                    max_prob = max(probs)
+                    max_swing = max_prob - min_prob
+
+                    first = snapshots[0]
+                    last = snapshots[-1]
+                    directional_change = last.probability - first.probability
+
+                    if max_swing >= 1:  # At least 1 point move
+                        movers.append({
+                            "market_id": market.id,
+                            "question": market.question,
+                            "category": market.category,
+                            "probability_start": first.probability,
+                            "probability_end": last.probability,
+                            "change_points": directional_change,
+                            "max_swing": max_swing,
+                            "abs_change": abs(directional_change),
+                            "window_hours": "all-time",
+                            "volume": market.volume,
+                            "is_historical": True
+                        })
 
             # Sort by max swing (captures volatile markets better)
             movers.sort(key=lambda m: m["max_swing"], reverse=True)
