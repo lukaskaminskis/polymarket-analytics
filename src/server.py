@@ -1,6 +1,8 @@
 """
 FastAPI server for Polymarket Analytics Dashboard.
 """
+import os
+import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,10 +31,42 @@ engine = AnalyticsEngine()
 polymarket_client = PolymarketClient()
 
 
+async def background_collection():
+    """Background task that collects data periodically."""
+    from .ingestion import run_ingestion
+
+    # Wait a bit before first collection to let server fully start
+    await asyncio.sleep(30)
+
+    # Use config setting (PM_COLLECTION_INTERVAL_HOURS env var)
+    collection_interval = settings.collection_interval_hours * 3600
+
+    while True:
+        try:
+            print(f"[{datetime.utcnow().isoformat()}] Starting background data collection...")
+            stats = await run_ingestion()
+            print(f"[{datetime.utcnow().isoformat()}] Collection complete: {stats['markets_fetched']} markets, {stats['snapshots_created']} snapshots")
+
+            # Also detect large moves after collection
+            moves = await engine.detect_large_moves()
+            if moves:
+                print(f"[{datetime.utcnow().isoformat()}] Detected {len(moves)} large moves")
+        except Exception as e:
+            print(f"[{datetime.utcnow().isoformat()}] Collection error: {e}")
+
+        # Wait for next collection cycle
+        await asyncio.sleep(collection_interval)
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize database on startup."""
     await init_db()
+
+    # Start background collection if enabled
+    if os.getenv("ENABLE_BACKGROUND_COLLECTION", "true").lower() == "true":
+        asyncio.create_task(background_collection())
+        print(f"Background data collection enabled (every {settings.collection_interval_hours} hour(s))")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -217,6 +251,42 @@ async def api_movers(limit: int = 20):
 async def api_black_swans(limit: int = 50):
     """API endpoint for black swan events."""
     return await engine.get_black_swans(limit=limit)
+
+
+# Data collection endpoints
+@app.post("/api/collect")
+async def api_collect(secret: str = None):
+    """
+    Trigger data collection. Can be called by Railway cron or external services.
+
+    For security, optionally check a secret token via query param or header.
+    Set COLLECT_SECRET environment variable to enable authentication.
+    """
+    import os
+    from .ingestion import run_ingestion
+
+    # Check secret if configured
+    expected_secret = os.getenv("COLLECT_SECRET")
+    if expected_secret and secret != expected_secret:
+        raise HTTPException(status_code=403, detail="Invalid or missing secret")
+
+    try:
+        stats = await run_ingestion()
+        return {
+            "status": "success",
+            "stats": stats
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@app.get("/api/collect")
+async def api_collect_get(secret: str = None):
+    """GET version of collect for easier cron integration."""
+    return await api_collect(secret=secret)
 
 
 # Simulation endpoints
