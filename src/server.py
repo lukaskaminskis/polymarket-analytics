@@ -74,11 +74,15 @@ async def dashboard(request: Request):
     """Main dashboard page."""
     overview = await engine.get_overview_stats()
     markets = await engine.get_active_markets(limit=20)
-    movers = await engine.get_recent_movers(limit=10)
 
-    # If no local movers, try to get from API
-    if not movers:
+    # Always fetch movers from API for freshest data
+    # Local movers require multiple snapshots over time
+    try:
         movers = await polymarket_client.get_api_movers(limit=10)
+    except Exception as e:
+        print(f"Error fetching movers from API: {e}")
+        # Fallback to local data
+        movers = await engine.get_recent_movers(limit=10)
 
     # Fetch black swans from API if local count is 0
     black_swans = []
@@ -146,11 +150,12 @@ async def market_detail(request: Request, market_id: str):
 @app.get("/movers", response_class=HTMLResponse)
 async def movers_page(request: Request):
     """Large movers page."""
-    movers = await engine.get_recent_movers(limit=50)
-
-    # If no local movers, fetch from Polymarket API
-    if not movers:
+    # Always fetch from API for freshest data
+    try:
         movers = await polymarket_client.get_api_movers(limit=50)
+    except Exception as e:
+        print(f"Error fetching movers from API: {e}")
+        movers = await engine.get_recent_movers(limit=50)
 
     return templates.TemplateResponse("movers.html", {
         "request": request,
